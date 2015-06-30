@@ -164,21 +164,24 @@ class FuzzRequest(BaseFuzzRequest, Request):
 
     @staticmethod
     def from_seed(seed, payload):
-	marker_regex = re.compile("FUZ\d*Z",re.MULTILINE|re.DOTALL)
-	fuzz_words = len(marker_regex.findall(seed.getAll()))
-	if seed.wf_fuzz_methods:
-	    fuzz_words += 1
-
-	if len(payload) != fuzz_words:
-	    raise FuzzException(FuzzException.FATAL, "FUZZ words and number of payloads do not match!")
-
 	rawReq = seed.getAll()
 	schema = seed.schema
 	method, userpass = seed.getAuth()
 	http_method = None
 
-	newreq = seed.from_copy()
+	marker_regex = re.compile("FUZ\d*Z",re.MULTILINE|re.DOTALL)
+	fuzz_words = len(set(marker_regex.findall(rawReq)))
 
+	if seed.wf_fuzz_methods:
+	    fuzz_words += 1
+
+	if method:
+	    fuzz_words += len(set(marker_regex.findall(userpass)))
+
+	if len(payload) != fuzz_words:
+	    raise FuzzException(FuzzException.FATAL, "FUZZ words and number of payloads do not match!")
+
+	newreq = seed.from_copy()
 	rawUrl = newreq.completeUrl
 
 	for payload_pos, payload_content in enumerate(payload, start=1):
@@ -235,7 +238,10 @@ class FuzzRequest(BaseFuzzRequest, Request):
 	seed.parseRequest(rawReq, schema)
 	if seed.wf_fuzz_methods: seed.method = "FUZZ"
 
-	baseline_req = FuzzRequest.from_seed(seed, baseline_payload)
+	try:
+	    baseline_req = FuzzRequest.from_seed(seed, baseline_payload)
+	except FuzzException:
+	    raise FuzzException(FuzzException.FATAL, "You must supply a baseline value for all the FUZZ words.")
 	baseline_req.wf_is_baseline = True
 
 	return baseline_req
@@ -349,16 +355,11 @@ class FuzzRequest(BaseFuzzRequest, Request):
         if options['head']:
             fr.method="HEAD"
 
-        if options['cookie']:
-            fr.addHeader("Cookie", options['cookie'])
+	if options['cookie']:
+            fr.addHeader("Cookie", "; ".join(options['cookie']))
 
-        if options['extraheaders']:
-            hh = options['extraheaders'].split(",")
-            for x in hh:
-                splitted = x.partition(":")
-		if splitted[1] != ":":
-		    raise FuzzException(FuzzException.FATAL, "Wrong header specified, it should be in the format \"name: value\".")
-                fr.addHeader(splitted[0], splitted[2])
+	for h,v in options['extraheaders']:
+	    fr.addHeader(h, v)
 
         if options['allvars']:
 	    fr.wf_allvars = options['allvars']
